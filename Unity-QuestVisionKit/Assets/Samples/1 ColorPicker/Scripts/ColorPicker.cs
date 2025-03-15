@@ -12,6 +12,7 @@ public enum SamplingMode
 public class ColorPicker : MonoBehaviour
 {
     [SerializeField] private SamplingMode samplingMode = SamplingMode.Environment;
+    [SerializeField] private float fadeDuration = 3f;  // Dauer des Farbübergangs in Sekunden
 
     [Header("Environment Sampling")]
     [SerializeField] private Transform raySampleOrigin;
@@ -34,6 +35,9 @@ public class ColorPicker : MonoBehaviour
     private WebCamTexture _webcamTexture;
     private WebCamTextureManager _cameraManager;
     private EnvironmentRaycastManager _raycastManager;
+    private Color _currentColor;
+    private Color _targetColor;
+    private Coroutine _fadeCoroutine;
 
     private void Start()
     {
@@ -52,6 +56,10 @@ public class ColorPicker : MonoBehaviour
         if (manualSamplingOrigin)
         {
             _manualRenderer = manualSamplingOrigin.GetComponent<Renderer>();
+            if (_manualRenderer)
+            {
+                _currentColor = _manualRenderer.material.color;
+            }
         }
 
         SetupLineRenderer();
@@ -111,8 +119,46 @@ public class ColorPicker : MonoBehaviour
 
         if (_manualRenderer)
         {
-            _manualRenderer.material.color = color;
+            _targetColor = color;
+            
+            // Stoppe vorherige Fade-Coroutine, falls eine läuft
+            if (_fadeCoroutine != null)
+            {
+                StopCoroutine(_fadeCoroutine);
+            }
+            
+            // Starte neue Fade-Coroutine
+            _fadeCoroutine = StartCoroutine(FadeToColor());
         }
+    }
+
+    private IEnumerator FadeToColor()
+    {
+        Color startColor = _currentColor;
+        float elapsedTime = 0f;
+        
+        while (elapsedTime < fadeDuration)
+        {
+            elapsedTime += Time.deltaTime;
+            float t = Mathf.Clamp01(elapsedTime / fadeDuration);
+            _currentColor = Color.Lerp(startColor, _targetColor, t);
+            
+            if (_manualRenderer)
+            {
+                _manualRenderer.material.color = _currentColor;
+            }
+            
+            yield return null;
+        }
+        
+        // Stelle sicher, dass wir exakt die Zielfarbe erreichen
+        _currentColor = _targetColor;
+        if (_manualRenderer)
+        {
+            _manualRenderer.material.color = _currentColor;
+        }
+        
+        _fadeCoroutine = null;
     }
 
     private Vector2 WorldToTextureUV(Vector3 worldPoint)
