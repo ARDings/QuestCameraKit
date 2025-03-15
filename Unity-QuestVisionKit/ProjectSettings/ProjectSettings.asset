@@ -144,6 +144,7 @@ PlayerSettings:
   preloadedAssets:
   - {fileID: 11400000, guid: 5d826038237f5496fbd76f720ad11943, type: 2}
   - {fileID: 0}
+  - {fileID: 11400000, guid: 49bbe79ab098cb540b580e08ead89429, type: 2}
   metroInputSource: 0
   wsaTransparentSwapchain: 0
   m_HolographicPauseOnTrackingLoss: 1
@@ -176,7 +177,7 @@ PlayerSettings:
   overrideDefaultApplicationIdentifier: 1
   AndroidBundleVersionCode: 1
   AndroidMinSdkVersion: 32
-  AndroidTargetSdkVersion: 0
+  AndroidTargetSdkVersion: 32
   AndroidPreferredInstallLocation: 0
   aotOptions: 
   stripEngineCode: 1
@@ -830,7 +831,7 @@ PlayerSettings:
   webGLCloseOnQuit: 0
   webWasm2023: 0
   scriptingDefineSymbols:
-    Android: 
+    Android: ZXING_ENABLED
     EmbeddedLinux: 
     GameCoreScarlett: 
     GameCoreXboxOne: 
@@ -840,11 +841,11 @@ PlayerSettings:
     PS5: 
     QNX: 
     ReservedCFE: 
-    Standalone: 
+    Standalone: ZXING_ENABLED
     VisionOS: 
     Windows Store Apps: 
     XboxOne: 
-    iPhone: 
+    iPhone: ZXING_ENABLED
     tvOS: 
   additionalCompilerArguments: {}
   platformArchitecture: {}

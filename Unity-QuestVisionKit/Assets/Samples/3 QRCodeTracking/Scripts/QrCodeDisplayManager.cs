@@ -152,5 +152,20 @@ public class QrCodeDisplayManager : MonoBehaviour
             _activeMarkers.Remove(key);
         }
     }
+
+    public Dictionary<string, MarkerController> GetActiveMarkers()
+    {
+        Dictionary<string, MarkerController> result = new Dictionary<string, MarkerController>();
+        
+        foreach (var kvp in _activeMarkers)
+        {
+            if (kvp.Value.gameObject.activeSelf)
+            {
+                result.Add(kvp.Key, kvp.Value);
+            }
+        }
+        
+        return result;
+    }
 #endif
 }
