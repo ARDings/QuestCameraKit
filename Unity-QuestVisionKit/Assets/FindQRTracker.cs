@@ -1,21 +1,34 @@
 using UnityEngine;
 using System.Collections.Generic;
+using UnityEngine.XR;
 
 public class FindQRTracker : MonoBehaviour
 {
     private GameObject marker1 = null;
     private GameObject marker2 = null;
-    private GameObject clonedObject = null;
+    private GameObject clonedObject1 = null;
+    private GameObject clonedObject2 = null;
     private LineRenderer lineRenderer = null;
-    private GameObject middleCircle = null;
     
-    // Position history für die letzten 30 Frames
+    [SerializeField] private GameObject cubePrefab = null; // Feld für das Würfel-Prefab im Inspector
+    [SerializeField] private GameObject markerObjectPrefab = null; // Prefab für die Objekte auf den Markern
+    private GameObject middleCube = null;
+    private GameObject directionArrow = null; // Neuer Pfeil für die Richtungsanzeige
+    private bool bothMarkersPlaced = false;
+    
+    // Position history für die ersten 90 Frames und die zweiten 90 Frames
     private Queue<Vector3> marker1PositionHistory = new Queue<Vector3>();
     private Queue<Vector3> marker2PositionHistory = new Queue<Vector3>();
-    private const int HISTORY_LENGTH = 30;
     
-    // Rotationsgeschwindigkeit in Grad pro Sekunde
-    [SerializeField] private float rotationSpeed = 30.0f;
+    // Anzahl der Frames für stabile Positionierung reduziert
+    private const int HISTORY_LENGTH = 60;  // Von 90 auf 60 reduziert
+    
+    // Marker-IDs für bessere Konsistenz speichern
+    private int marker1ID = -1;
+    private int marker2ID = -1;
+    
+    // Minimale Distanz zwischen den Markern (50cm)
+    private const float MIN_MARKER_DISTANCE = 0.5f;
     
     // Start is called once before the first execution of Update after the MonoBehaviour is created
     void Start()
@@ -29,32 +42,98 @@ public class FindQRTracker : MonoBehaviour
         lineRenderer.endColor = Color.red;
         lineRenderer.positionCount = 2;
         
-        // Kreis-Objekt für die Mitte erstellen
-        middleCircle = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-        middleCircle.transform.localScale = new Vector3(0.1f, 0.1f, 0.1f);
-        middleCircle.GetComponent<Renderer>().material.color = Color.green;
-        middleCircle.SetActive(false);
+        // Würfel-Objekt erstellen oder Prefab instanziieren
+        if (cubePrefab != null)
+        {
+            middleCube = Instantiate(cubePrefab);
+        }
+        else
+        {
+            // Fallback: Würfel-Objekt für die Mitte erstellen, wenn kein Prefab gesetzt ist
+            middleCube = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            middleCube.transform.localScale = new Vector3(0.3f, 0.3f, 0.3f); // 30x30x30 cm
+
+            // Standardmaterial verwenden
+            Renderer cubeRenderer = middleCube.GetComponent<Renderer>();
+            cubeRenderer.material = new Material(Shader.Find("Universal Render Pipeline/Lit"));
+            cubeRenderer.material.color = Color.green;
+        }
         
-        UpdateMarkerReferences();
+        // Richtungspfeil erstellen (als Zylinder)
+        directionArrow = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        
+        // Zylinder als Kind dem Würfel hinzufügen und positionieren
+        directionArrow.transform.SetParent(middleCube.transform);
+        directionArrow.transform.localScale = new Vector3(0.05f, 0.25f, 0.05f); // Dünner, länglicher Zylinder
+        directionArrow.transform.localPosition = new Vector3(0, 0, 0.25f); // Vor dem Würfel platzieren (Z-Achse)
+        directionArrow.transform.localRotation = Quaternion.Euler(90, 0, 0); // Rotieren, damit er in Z-Richtung zeigt
+        
+        // Richtungspfeil einfärben
+        Renderer arrowRenderer = directionArrow.GetComponent<Renderer>();
+        arrowRenderer.material = new Material(Shader.Find("Universal Render Pipeline/Lit"));
+        arrowRenderer.material.color = Color.red;
+        
+        // Würfel und Pfeil initial ausblenden
+        middleCube.SetActive(false);
     }
 
     // Update is called once per frame
     void Update()
     {
-        UpdateMarkerReferences();
-        HandleTwoMarkers();
+        // Prüfe auf Stick-Druck des linken Controllers
+        CheckForResetInput();
         
-        // Rotation für dieses Objekt anwenden
-        if (marker1 != null)
+        // Wenn beide Marker platziert sind, nicht mehr nach weiteren suchen
+        if (!bothMarkersPlaced)
         {
-            transform.Rotate(Vector3.up, rotationSpeed * Time.deltaTime);
+            UpdateMarkerReferences();
+            HandleMarkers();
+        }
+    }
+    
+    // Prüft, ob der Stick des linken Controllers gedrückt wurde
+    private void CheckForResetInput()
+    {
+        // Prüfen, ob der linke Controller-Stick gedrückt wurde
+        InputDevice leftController = InputDevices.GetDeviceAtXRNode(XRNode.LeftHand);
+        if (leftController.isValid)
+        {
+            bool stickPressed = false;
+            leftController.TryGetFeatureValue(CommonUsages.primary2DAxisClick, out stickPressed);
+            
+            if (stickPressed)
+            {
+                ResetAll();
+            }
+        }
+    }
+    
+    // Setzt alle Objekte zurück
+    private void ResetAll()
+    {
+        bothMarkersPlaced = false;
+        
+        if (clonedObject1 != null)
+        {
+            Destroy(clonedObject1);
+            clonedObject1 = null;
         }
         
-        // Rotation für den Klon anwenden
-        if (clonedObject != null && marker2 != null)
+        if (clonedObject2 != null)
         {
-            clonedObject.transform.Rotate(Vector3.up, rotationSpeed * Time.deltaTime);
+            Destroy(clonedObject2);
+            clonedObject2 = null;
         }
+        
+        marker1 = null;
+        marker2 = null;
+        marker1PositionHistory.Clear();
+        marker2PositionHistory.Clear();
+        
+        if (lineRenderer != null) lineRenderer.enabled = false;
+        if (middleCube != null) middleCube.SetActive(false);
+        
+        Debug.Log("QR Tracker: Alles zurückgesetzt");
     }
     
     // Sucht nach allen GameObjects mit dem Tag "Marker" und aktualisiert die Referenzen
@@ -62,82 +141,201 @@ public class FindQRTracker : MonoBehaviour
     {
         GameObject[] markers = GameObject.FindGameObjectsWithTag("Marker");
         
-        if (markers.Length >= 2)
+        // Kein Marker gefunden
+        if (markers.Length == 0)
         {
-            // Die letzten zwei im Array verwenden
-            marker1 = markers[markers.Length - 1];
-            marker2 = markers[markers.Length - 2];
+            Debug.Log("QR Tracker: Keine Marker gefunden");
+            return;
         }
-        else if (markers.Length == 1)
+        
+        // Erster Marker noch nicht gesetzt oder verloren gegangen
+        if (marker1 == null)
         {
             marker1 = markers[0];
-            marker2 = null;
+            marker1ID = marker1.GetInstanceID();
+            Debug.Log("QR Tracker: Erster Marker gefunden/wiederhergestellt: " + marker1.name + " (ID: " + marker1ID + ")");
+            // History zurücksetzen
+            marker1PositionHistory.Clear();
+            return;
         }
-        else
+        
+        // Überprüfen, ob der erste Marker noch existiert und aktualisieren
+        bool marker1Found = false;
+        foreach (GameObject marker in markers)
         {
-            marker1 = null;
-            marker2 = null;
+            if (marker.GetInstanceID() == marker1ID)
+            {
+                marker1 = marker; // Referenz auffrischen
+                marker1Found = true;
+                break;
+            }
+        }
+        
+        if (!marker1Found && markers.Length > 0)
+        {
+            // Ersten Marker neu zuweisen, wenn er verloren gegangen ist
+            marker1 = markers[0];
+            marker1ID = marker1.GetInstanceID();
+            marker1PositionHistory.Clear();
+            Debug.Log("QR Tracker: Erster Marker neu zugewiesen: " + marker1.name + " (ID: " + marker1ID + ")");
+        }
+        
+        // Wenn wir schon den ersten Marker haben, suchen wir nach einem anderen Marker
+        if (marker1 != null && marker2 == null && markers.Length >= 2)
+        {
+            foreach (GameObject potentialMarker2 in markers)
+            {
+                // Wir prüfen, ob es sich um einen anderen Marker handelt
+                // und ob der Marker weit genug entfernt ist
+                if (potentialMarker2.GetInstanceID() != marker1ID &&
+                    Vector3.Distance(potentialMarker2.transform.position, marker1.transform.position) >= MIN_MARKER_DISTANCE)
+                {
+                    marker2 = potentialMarker2;
+                    marker2ID = marker2.GetInstanceID();
+                    // History zurücksetzen
+                    marker2PositionHistory.Clear();
+                    Debug.Log("QR Tracker: Zweiter Marker gefunden: " + marker2.name + 
+                              " (ID: " + marker2ID + ", Abstand: " + Vector3.Distance(marker2.transform.position, marker1.transform.position) + " m)");
+                    break;
+                }
+            }
+        }
+        // Falls der zweite Marker bereits bekannt ist, prüfen, ob er noch existiert
+        else if (marker1 != null && marker2 != null)
+        {
+            bool marker2Found = false;
+            foreach (GameObject marker in markers)
+            {
+                if (marker.GetInstanceID() == marker2ID)
+                {
+                    marker2 = marker; // Referenz auffrischen
+                    marker2Found = true;
+                    break;
+                }
+            }
+            
+            if (!marker2Found)
+            {
+                // Wenn der zweite Marker verloren gegangen ist, nach einem neuen suchen
+                marker2 = null;
+                marker2ID = -1;
+                marker2PositionHistory.Clear();
+                Debug.Log("QR Tracker: Zweiter Marker verloren, suche nach neuem zweiten Marker");
+                
+                // Sofort versuchen, einen neuen zweiten Marker zu finden
+                foreach (GameObject potentialMarker2 in markers)
+                {
+                    if (potentialMarker2.GetInstanceID() != marker1ID &&
+                        Vector3.Distance(potentialMarker2.transform.position, marker1.transform.position) >= MIN_MARKER_DISTANCE)
+                    {
+                        marker2 = potentialMarker2;
+                        marker2ID = marker2.GetInstanceID();
+                        marker2PositionHistory.Clear();
+                        Debug.Log("QR Tracker: Neuer zweiter Marker gefunden: " + marker2.name + 
+                                  " (ID: " + marker2ID + ", Abstand: " + Vector3.Distance(marker2.transform.position, marker1.transform.position) + " m)");
+                        break;
+                    }
+                }
+            }
         }
     }
     
-    // Verarbeite zwei Marker, wenn vorhanden
-    private void HandleTwoMarkers()
+    // Verarbeite Marker, wenn vorhanden
+    private void HandleMarkers()
     {
         // Erstes Marker-Objekt verarbeiten
-        if (marker1 != null)
+        if (marker1 != null && clonedObject1 == null)
         {
             // Position in History aufnehmen
             AddToPositionHistory(marker1PositionHistory, marker1.transform.position);
             
-            // Dieses Objekt zur geglätteten Position bewegen
-            Vector3 smoothedPosition = CalculateSmoothedPosition(marker1PositionHistory);
-            transform.position = smoothedPosition;
+            // Sobald genügend Frames gesammelt wurden, ersten Klon erstellen
+            if (marker1PositionHistory.Count >= HISTORY_LENGTH)
+            {
+                Vector3 smoothedPosition = CalculateSmoothedPosition(marker1PositionHistory);
+                
+                // Prefab oder Fallback verwenden
+                if (markerObjectPrefab != null) 
+                {
+                    clonedObject1 = Instantiate(markerObjectPrefab, smoothedPosition, Quaternion.identity);
+                }
+                else 
+                {
+                    // Fallback: Gameobject klonen, wenn kein Prefab gesetzt ist
+                    clonedObject1 = Instantiate(gameObject, smoothedPosition, Quaternion.identity);
+                    
+                    // Skript vom Klon entfernen, damit keine Endlosschleife entsteht
+                    Destroy(clonedObject1.GetComponent<FindQRTracker>());
+                    
+                    // LineRenderer vom Klon entfernen
+                    if (clonedObject1.GetComponent<LineRenderer>() != null)
+                    {
+                        Destroy(clonedObject1.GetComponent<LineRenderer>());
+                    }
+                }
+                
+                Debug.Log("QR Tracker: Erstes Objekt platziert bei " + smoothedPosition);
+            }
         }
         
-        // Bei zwei Markern
-        if (marker1 != null && marker2 != null)
+        // Zweites Marker-Objekt verarbeiten
+        if (marker2 != null && clonedObject1 != null && clonedObject2 == null)
         {
-            // Position des zweiten Markers in History aufnehmen
+            // Position in History aufnehmen
             AddToPositionHistory(marker2PositionHistory, marker2.transform.position);
-            Vector3 smoothedPosition2 = CalculateSmoothedPosition(marker2PositionHistory);
             
-            // Clone erstellen, wenn noch nicht vorhanden
-            if (clonedObject == null)
+            // Debug-Ausgabe für Fortschritt
+            if (marker2PositionHistory.Count % 10 == 0 || marker2PositionHistory.Count == HISTORY_LENGTH)
             {
-                clonedObject = Instantiate(gameObject, smoothedPosition2, Quaternion.identity);
+                Debug.Log("QR Tracker: Sammle Daten für zweiten Marker: " + marker2PositionHistory.Count + 
+                          "/" + HISTORY_LENGTH + " Frames");
+            }
+            
+            // Sobald genügend Frames gesammelt wurden, zweiten Klon erstellen
+            if (marker2PositionHistory.Count >= HISTORY_LENGTH)
+            {
+                Vector3 smoothedPosition = CalculateSmoothedPosition(marker2PositionHistory);
                 
-                // LineRenderer und dieses Skript vom Klon entfernen, damit keine Endlosschleife entsteht
-                Destroy(clonedObject.GetComponent<FindQRTracker>());
-                Destroy(clonedObject.GetComponent<LineRenderer>());
+                // Prefab oder Fallback verwenden
+                if (markerObjectPrefab != null) 
+                {
+                    clonedObject2 = Instantiate(markerObjectPrefab, smoothedPosition, Quaternion.identity);
+                }
+                else 
+                {
+                    // Fallback: Gameobject klonen, wenn kein Prefab gesetzt ist
+                    clonedObject2 = Instantiate(gameObject, smoothedPosition, Quaternion.identity);
+                    
+                    // Skript vom Klon entfernen, damit keine Endlosschleife entsteht
+                    Destroy(clonedObject2.GetComponent<FindQRTracker>());
+                    
+                    // LineRenderer vom Klon entfernen
+                    if (clonedObject2.GetComponent<LineRenderer>() != null)
+                    {
+                        Destroy(clonedObject2.GetComponent<LineRenderer>());
+                    }
+                }
+                
+                // Marker sind platziert, nicht mehr nach weiteren suchen
+                bothMarkersPlaced = true;
+                Debug.Log("QR Tracker: Zweites Objekt platziert bei " + smoothedPosition);
             }
-            else
-            {
-                // Klon auf den zweiten Marker setzen
-                clonedObject.transform.position = smoothedPosition2;
-            }
-            
+        }
+        
+        // Bei zwei Klonen Linie und Würfel anzeigen
+        if (clonedObject1 != null && clonedObject2 != null)
+        {
             // Linie zwischen beiden Objekten zeichnen
             lineRenderer.enabled = true;
-            lineRenderer.SetPosition(0, transform.position);
-            lineRenderer.SetPosition(1, clonedObject.transform.position);
+            lineRenderer.SetPosition(0, clonedObject1.transform.position);
+            lineRenderer.SetPosition(1, clonedObject2.transform.position);
             
-            // Kreis in der Mitte positionieren
-            Vector3 middlePosition = (transform.position + clonedObject.transform.position) / 2;
-            middleCircle.transform.position = middlePosition;
-            middleCircle.SetActive(true);
-        }
-        else
-        {
-            // Wenn weniger als 2 Marker, Linie und Kreis ausblenden
-            if (lineRenderer != null) lineRenderer.enabled = false;
-            if (middleCircle != null) middleCircle.SetActive(false);
+            // Würfel in der Mitte positionieren
+            Vector3 middlePosition = (clonedObject1.transform.position + clonedObject2.transform.position) / 2;
+            middleCube.transform.position = middlePosition;
+            middleCube.SetActive(true);
             
-            // Optional: Klon entfernen, wenn er existiert
-            if (clonedObject != null)
-            {
-                Destroy(clonedObject);
-                clonedObject = null;
-            }
+            Debug.Log("QR Tracker: Linie und Würfel zwischen Objekten gezeichnet");
         }
     }
     

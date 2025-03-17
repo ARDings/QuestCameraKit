@@ -119,43 +119,97 @@ public class ColorPicker : MonoBehaviour
 
         if (_manualRenderer)
         {
-            _targetColor = color;
-            
-            // Stoppe vorherige Fade-Coroutine, falls eine läuft
-            if (_fadeCoroutine != null)
+            // Finde das Elternobjekt
+            Transform parentTransform = manualSamplingOrigin.parent;
+            if (parentTransform != null)
             {
-                StopCoroutine(_fadeCoroutine);
+                // Dupliziere das Elternobjekt an seiner aktuellen Position
+                GameObject duplicatedParent = Instantiate(parentTransform.gameObject, parentTransform.position, parentTransform.rotation);
+                
+                // Finde das entsprechende Kind im duplizierten Objekt, das dem manualSamplingOrigin entspricht
+                Transform[] duplicatedChildren = duplicatedParent.GetComponentsInChildren<Transform>();
+                Renderer duplicatedRenderer = null;
+                
+                foreach (Transform child in duplicatedChildren)
+                {
+                    // Überprüfe, ob der Name des Kindes dem des manualSamplingOrigin entspricht
+                    if (child.name == manualSamplingOrigin.name)
+                    {
+                        duplicatedRenderer = child.GetComponent<Renderer>();
+                        break;
+                    }
+                }
+                
+                if (duplicatedRenderer != null)
+                {
+                    // Erstelle ein neues Material, um Konflikte zu vermeiden
+                    Material newMaterial = new Material(duplicatedRenderer.material);
+                    duplicatedRenderer.material = newMaterial;
+                    
+                    // Starte Farbübergang für das duplizierte Objekt
+                    _targetColor = color;
+                    
+                    // Stoppe vorherige Fade-Coroutine, falls eine läuft
+                    if (_fadeCoroutine != null)
+                    {
+                        StopCoroutine(_fadeCoroutine);
+                    }
+                    
+                    // Starte neue Fade-Coroutine
+                    Color startColor = duplicatedRenderer.material.color;
+                    _fadeCoroutine = StartCoroutine(FadeToColor(duplicatedRenderer, startColor));
+                }
             }
-            
-            // Starte neue Fade-Coroutine
-            _fadeCoroutine = StartCoroutine(FadeToColor());
+            else
+            {
+                // Fallback: Wenn kein Elternobjekt vorhanden ist, ändere nur die Farbe des Originals
+                _targetColor = color;
+                
+                if (_fadeCoroutine != null)
+                {
+                    StopCoroutine(_fadeCoroutine);
+                }
+                
+                _fadeCoroutine = StartCoroutine(FadeToColor(_manualRenderer, _currentColor));
+            }
         }
     }
 
-    private IEnumerator FadeToColor()
+    private IEnumerator FadeToColor(Renderer targetRenderer = null, Color? startColorOverride = null)
     {
-        Color startColor = _currentColor;
+        // Wenn kein Ziel-Renderer übergeben wurde, verwende den Standard-Renderer
+        if (targetRenderer == null)
+        {
+            targetRenderer = _manualRenderer;
+        }
+
+        Color startColor = startColorOverride ?? _currentColor;
         float elapsedTime = 0f;
         
         while (elapsedTime < fadeDuration)
         {
             elapsedTime += Time.deltaTime;
             float t = Mathf.Clamp01(elapsedTime / fadeDuration);
-            _currentColor = Color.Lerp(startColor, _targetColor, t);
+            Color currentColor = Color.Lerp(startColor, _targetColor, t);
             
-            if (_manualRenderer)
+            if (targetRenderer)
             {
-                _manualRenderer.material.color = _currentColor;
+                targetRenderer.material.color = currentColor;
             }
             
             yield return null;
         }
         
         // Stelle sicher, dass wir exakt die Zielfarbe erreichen
-        _currentColor = _targetColor;
-        if (_manualRenderer)
+        if (targetRenderer)
         {
-            _manualRenderer.material.color = _currentColor;
+            targetRenderer.material.color = _targetColor;
+        }
+        
+        // Aktualisiere _currentColor nur, wenn wir das Original-Objekt ändern
+        if (targetRenderer == _manualRenderer)
+        {
+            _currentColor = _targetColor;
         }
         
         _fadeCoroutine = null;
